@@ -9,4 +9,4 @@ pip3 install mutagen pydub librosa numpy ffmpeg tqdm
 ```
 
 ## DJ Tools
-- **sort.pyr**: A python script that looks at my music library and gives it back to me organized by BPM using multiple methods and averaging for accuracy in complex electronic music. 
+- **sort.py**: A python script that looks at my music library and gives it back to me organized by BPM using multiple methods and averaging for accuracy in complex electronic music. 
