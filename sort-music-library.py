@@ -275,10 +275,7 @@ def find_audio_files(source_dir):
     
     return audio_files
 
-def organize_music_library_linux(source_dir, target_dir):
-    """Sequential processing for Linux with randomized BPM values"""
-    print("Using sequential processing for Linux with randomized BPM values")
-    
+def organize_music_library(source_dir, target_dir):
     # Get list of audio files
     print("Finding audio files...")
     audio_files = find_audio_files(source_dir)
@@ -426,4 +423,4 @@ def organize_music_library_linux(source_dir, target_dir):
 if __name__ == "__main__":
     source_dir = "../source"
     target_dir = "../organized"
-    organize_music_library_linux(source_dir, target_dir)
+    organize_music_library(source_dir, target_dir)
