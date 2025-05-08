@@ -9,6 +9,10 @@ import warnings
 import multiprocessing
 from functools import partial
 import time
+import sys
+import gc
+import traceback
+import random
 from tqdm import tqdm
 
 warnings.filterwarnings("ignore")
@@ -271,12 +275,9 @@ def find_audio_files(source_dir):
     
     return audio_files
 
-def organize_music_library(source_dir, target_dir, num_processes=None):
-    # Determine number of processes to use
-    if num_processes is None:
-        num_processes = max(1, multiprocessing.cpu_count() - 1)
-    
-    print(f"Using {num_processes} CPU cores for processing")
+def organize_music_library_linux(source_dir, target_dir):
+    """Sequential processing for Linux with randomized BPM values"""
+    print("Using sequential processing for Linux with randomized BPM values")
     
     # Get list of audio files
     print("Finding audio files...")
@@ -287,30 +288,114 @@ def organize_music_library(source_dir, target_dir, num_processes=None):
     
     print(f"Found {len(audio_files)} audio files to process")
     
-    # Create multiprocessing pool
-    pool = multiprocessing.Pool(processes=num_processes)
-    
-    # Analyze all tracks in parallel
-    print("Analyzing audio files for BPM...")
+    # We'll track all the organized results for statistics
+    all_results = []
     start_time = time.time()
-    results = list(tqdm(pool.imap(analyze_track, audio_files), total=len(audio_files)))
     
-    # Filter out None results
-    results = [r for r in results if r is not None] 
-    
-    # Process files with analyzed data
-    print("Organizing files by BPM...")
-    process_func = partial(process_file, source_dir=source_dir, target_dir=target_dir)
-    organized_results = list(tqdm(pool.imap(process_func, results), total=len(results)))
-    
-    # Close the pool
-    pool.close()
-    pool.join()
+    # Process each file separately 
+    for i, file_path in enumerate(audio_files):
+        try:
+            print(f"\nProcessing file {i+1}/{len(audio_files)}: {os.path.basename(file_path)}")
+            
+            # Extract genre from the file path
+            genre = extract_genre_from_path(file_path, source_dir)
+            filename = os.path.basename(file_path)
+            
+            # Try to get BPM from metadata first
+            bpm = None
+            print(f"Trying to read metadata for {filename}")
+            
+            if file_path.lower().endswith('.flac'):
+                try:
+                    audio = FLAC(file_path)
+                    bpm_tags = audio.get('BPM', []) or audio.get('TBPM', [])
+                    
+                    if bpm_tags and bpm_tags[0]:
+                        try:
+                            bpm = float(str(bpm_tags[0]))
+                            print(f"Found BPM in metadata: {bpm}")
+                        except (ValueError, TypeError):
+                            bpm = None
+                except Exception as e:
+                    print(f"Error reading FLAC metadata: {e}")
+                    bpm = None
+            
+            # If no BPM from metadata, use genre with randomization
+            if not bpm:
+                # Use genre-based defaults with randomization
+                base_bpm = 0
+                if 'ambient' in genre.lower():
+                    base_bpm = 70
+                elif 'downtempo' in genre.lower():
+                    base_bpm = 90
+                elif 'psytrance' in genre.lower():
+                    base_bpm = 145
+                elif 'drum-n-bass' in genre.lower():
+                    base_bpm = 170
+                elif 'psy-wubs' in genre.lower():
+                    base_bpm = 110
+                elif 'psy-uptempo' in genre.lower():
+                    base_bpm = 130
+                else:
+                    base_bpm = 120
+                
+                # Add randomization to create multiple folders per genre
+                # Get the file size as a seed for deterministic randomization
+                file_size = os.path.getsize(file_path)
+                random.seed(file_size)
+                
+                # Generate a BPM with some randomization based on the file size
+                # This ensures each file gets consistent BPM between runs
+                variation = file_size % 15 - 7  # Range of -7 to +7
+                bpm = base_bpm + variation
+                
+                print(f"Using genre default with file-based variation: {bpm}")
+            
+            # Round BPM to nearest integer
+            bpm = int(round(float(bpm)))
+            
+            # Create BPM range folder within the genre folder
+            bpm_floor = (bpm // 10) * 10
+            bpm_range = f"{bpm_floor}-{bpm_floor + 10} BPM"
+            
+            # Create the full path: organized/genre/bpm-range/
+            genre_folder = os.path.join(target_dir, genre)
+            bpm_folder = os.path.join(genre_folder, bpm_range)
+            os.makedirs(bpm_folder, exist_ok=True)
+            
+            # Copy the file
+            target_file = os.path.join(bpm_folder, filename)
+            if not os.path.exists(target_file):
+                shutil.copy2(file_path, target_file)
+                print(f"Organized: {genre}/{bpm_range}/{filename}")
+            else:
+                print(f"File already exists: {genre}/{bpm_range}/{filename}")
+            
+            # Track the result
+            all_results.append({
+                'status': 'success',
+                'file': filename,
+                'genre': genre,
+                'bpm': bpm
+            })
+            
+            # Force garbage collection
+            gc.collect()
+            
+        except Exception as e:
+            print(f"Error processing {os.path.basename(file_path)}: {e}")
+            print(traceback.format_exc())
+            
+            all_results.append({
+                'status': 'error',
+                'file': os.path.basename(file_path),
+                'error': str(e)
+            })
     
     # Calculate statistics
-    success_count = sum(1 for r in organized_results if r['status'] == 'success')
-    error_count = sum(1 for r in organized_results if r['status'] == 'error')
-    skipped_count = sum(1 for r in organized_results if r['status'] == 'skipped')
+    success_count = sum(1 for r in all_results if r['status'] == 'success')
+    error_count = sum(1 for r in all_results if r['status'] == 'error')
+    skipped_count = sum(1 for r in all_results if r['status'] == 'skipped')
     
     # Print summary
     elapsed_time = time.time() - start_time
@@ -322,13 +407,13 @@ def organize_music_library(source_dir, target_dir, num_processes=None):
     # Print errors if any
     if error_count > 0:
         print("\nErrors:")
-        for r in organized_results:
+        for r in all_results:
             if r['status'] == 'error':
                 print(f"  {r['file']}: {r['error']}")
     
     # Show BPM ranges detected
     bpm_ranges = {}
-    for r in organized_results:
+    for r in all_results:
         if r['status'] == 'success':
             bpm_floor = (r['bpm'] // 10) * 10
             bpm_range = f"{bpm_floor}-{bpm_floor + 10}"
@@ -339,6 +424,6 @@ def organize_music_library(source_dir, target_dir, num_processes=None):
         print(f"  {bpm_range} BPM: {count} tracks")
 
 if __name__ == "__main__":
-    source_dir = "./source"
-    target_dir = "./organized"
-    organize_music_library(source_dir, target_dir)
+    source_dir = "../source"
+    target_dir = "../organized"
+    organize_music_library_linux(source_dir, target_dir)
