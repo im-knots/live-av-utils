@@ -296,7 +296,7 @@ def organize_music_library(source_dir, target_dir, num_processes=None):
     results = list(tqdm(pool.imap(analyze_track, audio_files), total=len(audio_files)))
     
     # Filter out None results
-    results = [r for r in results if r is not None 
+    results = [r for r in results if r is not None] 
     
     # Process files with analyzed data
     print("Organizing files by BPM...")
